@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+      "target": "es6",
+      "module": "commonjs",
+      "sourceMap": true,
+      "experimentalDecorators": true,
+      "lib": [ "es6", "dom" ],
+      "outDir": ".",
+      "resolveJsonModule":true,
+      "emitDecoratorMetadata":true
+  },
+  "include":[
+    "src/test.spec.ts",
+    "src/unit-test.spec.ts"
+//    "src/scoring-platform.ts",
+//    "src/data-store-client.ts"
+  ],
+  "exclude": []
+
+}

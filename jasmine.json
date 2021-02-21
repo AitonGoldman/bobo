@@ -1,0 +1,15 @@
+{
+    "reporters": [
+      {
+        "name": "jasmine-spec-reporter#SpecReporter",
+        "options": {
+          "spec":{
+            "displayStacktrace": "all",
+            "displayPending": false
+          } 
+        }
+      }
+    ],
+    "spec_dir": "unitTests",
+    "spec_files": ["*"]
+  }

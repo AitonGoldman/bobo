@@ -1,0 +1,24 @@
+{
+  "exclude": [
+    "node_modules",
+    "dist",
+    "config",
+    "test"
+  ],
+  "compilerOptions": {
+    "sourceMap": true,
+    //"noImplicitAny": false,
+    "module": "commonJs",
+    "target": "es6",
+    "removeComments": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports":true,
+    "experimentalDecorators":true,
+    "emitDecoratorMetadata":true,
+    "lib": [ "es6", "dom" ],
+    "resolveJsonModule":true
+    },
+    "include": [
+      "src/**/*"    
+    ]
+  }
