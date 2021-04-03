@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { TournamentTypes } from './scoring-platform';
 export declare class EventQueueItemModel {
     playerId: string;
     gameStarted: boolean;
@@ -22,9 +23,9 @@ export declare class TournamentModel {
     tournamentName: string;
     machines: Map<string, MachineModel>;
     settings: TournamentSettings;
-    type: string;
+    type: TournamentTypes;
     results: string;
-    constructor(tournamentName: any, type: any, tournamentSettings?: TournamentSettings);
+    constructor(tournamentName: any, type: TournamentTypes, tournamentSettings?: TournamentSettings);
 }
 export declare class PlayerSummaryModel {
     playerName: string;

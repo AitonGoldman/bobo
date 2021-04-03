@@ -80,11 +80,8 @@ function changeDocReturned(mockDoc, newData) {
 
             if (dsClientType == "remoteTransaction") {
                 this.datastoreClient.setTransaction(this.mockFirebaseContainer.mockFirebaseTransactionHandle);
-            } 
+            }
         });
-        // xit("can query for documents", function(){
-
-        // })
         it("can create a document with a document id ", async function (this: TestWithMockProperties) {
             const createDocResult = await this.datastoreClient.createDoc({ test: 'data' }, 'testIdOne');
             expect(this.mockFirebaseContainer.mockFirebaseCollection.doc).toHaveBeenCalledWith('testIdOne');
@@ -120,12 +117,6 @@ function changeDocReturned(mockDoc, newData) {
                 expect(getDocResult.data()).toEqual({ mockData: 'TRANSACTION POOP' })
             }
         });
-        // xit("can gracefully handle getting a document that doesn't exist", async function(this: TestWithMockProperties) {
-
-        // });
-        // xit("can gracefully handle deleting a document that doesn't exist", async function(this: TestWithMockProperties) {
-
-        // });
         it("can delete a document", async function (this: TestWithMockProperties) {
             const createDocResult = await this.datastoreClient.deleteDoc('testIdOne');
             expect(this.mockFirebaseContainer.mockFirebaseCollection.doc).toHaveBeenCalledWith('testIdOne');
@@ -187,9 +178,6 @@ function changeDocReturned(mockDoc, newData) {
                 );
             }
         });
-        // xit("can gracefully handle updating a document that doesn't exist", async function(this: TestWithMockProperties) {
-
-        // });
         it("can update a document", async function (this: TestWithMockProperties) {
             const createDocResult = await this.datastoreClient.updateDoc('testIdOne', { dummyField: "dummyValue" });
             expect(this.mockFirebaseContainer.mockFirebaseCollection.doc).toHaveBeenCalledWith('testIdOne');
@@ -209,8 +197,20 @@ function changeDocReturned(mockDoc, newData) {
             const getDocResult = await this.datastoreClient.getDoc("testDoc");
             expect(getDocResult.data()).toEqual(this.datastoreClient.cachedDocments.get("testDoc").data());
         })
-        // xit("can gracefully handle an error while getting, deleting, updating, creating, or setting", async function(this: TestWithMockProperties) {
+        it("can gracefully handle an error while getting, deleting, updating, creating, or setting", async function(this: TestWithMockProperties) {
 
-        // });
+        });
+        it("can gracefully handle updating a document that doesn't exist", async function(this: TestWithMockProperties) {
+
+        });
+        it("can gracefully handle getting a document that doesn't exist", async function(this: TestWithMockProperties) {
+
+        });
+        it("can gracefully handle deleting a document that doesn't exist", async function(this: TestWithMockProperties) {
+
+        });
+        it("can query for documents", function(){
+
+        })
     });
 });

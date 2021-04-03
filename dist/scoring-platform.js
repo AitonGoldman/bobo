@@ -18,7 +18,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ScoringPlatform = void 0;
+exports.ScoringPlatform = exports.TournamentTypes = void 0;
 const models_1 = require("./models");
 const transaction_1 = require("./transaction");
 require("reflect-metadata");
@@ -26,9 +26,14 @@ const class_transformer_1 = require("class-transformer");
 const rxjs_1 = require("rxjs");
 const operators_1 = require("rxjs/operators");
 const HerbRanker_1 = require("./HerbRanker");
-class RecordScoreParams {
+var TournamentTypes;
+(function (TournamentTypes) {
+    TournamentTypes[TournamentTypes["HERB"] = 0] = "HERB";
+    TournamentTypes[TournamentTypes["PAPA"] = 1] = "PAPA";
+})(TournamentTypes = exports.TournamentTypes || (exports.TournamentTypes = {}));
+class PipelineParams {
 }
-class StartGameParams {
+class RecordScoreParams extends PipelineParams {
 }
 class ScoringPlatform {
     constructor(dsClient) {
@@ -88,7 +93,7 @@ class ScoringPlatform {
             return nextTournamentId;
         });
     }
-    getEvent(eventId, withoutResults, useCached = false) {
+    getEvent(eventId, withoutResults = true, useCached = false) {
         return __awaiter(this, void 0, void 0, function* () {
             const cachedDoc = this.dsClient.getCachedDoc(eventId);
             if (useCached && cachedDoc) {
@@ -270,7 +275,7 @@ class ScoringPlatform {
             const herbCheckTicketsAvailable = operators_1.tap((params) => {
                 const tournament = params.event.tournaments.get(params.tournamentId);
                 if (tournament.settings.requireTickets != true ||
-                    tournament.type != 'HERB') {
+                    tournament.type != TournamentTypes.HERB) {
                     return;
                 }
                 const player = params.event.listOfPlayers.get(params.playerId);
@@ -280,7 +285,7 @@ class ScoringPlatform {
             });
             const herbCheckGameStarted = operators_1.tap((params) => {
                 const tournament = params.event.tournaments.get(params.tournamentId);
-                if (tournament.type != 'HERB' ||
+                if (tournament.type != TournamentTypes.HERB ||
                     tournament.settings.requireGameStart != true) {
                     return;
                 }
@@ -296,7 +301,7 @@ class ScoringPlatform {
             });
             const herbResetCurrentPlayer = operators_1.tap((params) => {
                 const tournament = params.event.tournaments.get(params.tournamentId);
-                if (tournament.type != 'HERB') {
+                if (tournament.type != TournamentTypes.HERB) {
                     return;
                 }
                 params.event.tournaments
@@ -305,7 +310,7 @@ class ScoringPlatform {
             });
             const herbAdjustTickets = operators_1.tap((params) => {
                 const tournament = params.event.tournaments.get(params.tournamentId);
-                if (tournament.type != 'HERB') {
+                if (tournament.type != TournamentTypes.HERB) {
                     return;
                 }
                 const player = params.event.listOfPlayers.get(params.playerId);
@@ -315,11 +320,11 @@ class ScoringPlatform {
             });
             const recordScore = operators_1.tap((params) => {
                 const tournament = params.event.tournaments.get(params.tournamentId);
-                if (tournament.type != 'HERB') {
+                if (tournament.type != TournamentTypes.HERB) {
                     return;
                 }
                 let ranker;
-                if (tournament.type == 'HERB') {
+                if (tournament.type == TournamentTypes.HERB) {
                     ranker = new HerbRanker_1.HerbRanker();
                 }
                 ranker.deserialize(tournament.results);
@@ -440,7 +445,7 @@ __decorate([
 __decorate([
     transaction_1.transaction(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object, Object, models_1.TournamentSettings]),
+    __metadata("design:paramtypes", [String, String, Number, models_1.TournamentSettings]),
     __metadata("design:returntype", Promise)
 ], ScoringPlatform.prototype, "createTournament", null);
 __decorate([

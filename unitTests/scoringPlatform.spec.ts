@@ -7,31 +7,6 @@ import { plainToClass } from 'class-transformer';
 import { HerbDeserializedString, reviver } from '../src/HerbRanker';
 import { queue } from 'rxjs';
 
-function generateEventWithTournamentAndMachineAndPlayerWithDefaultValues(tournamentOptions: TournamentSettings, numberPlayerTickets: number = 0, playerStartedOnMachine: string = undefined) {
-    return {
-        tournaments: {
-            T1: {
-                type: TournamentTypes.HERB,
-                settings:
-                    tournamentOptions
-                ,
-                machines: {
-                    M1: {
-                        machineName: "Test Machine",
-                        machineQueue: [],
-                        currentPlayer: playerStartedOnMachine
-                    }
-                }
-            }
-        },
-        listOfPlayers: {
-            P101: {
-                playerName: "Test Player", ticketCounts: { T1: numberPlayerTickets }
-            }
-        }
-    }
-}
-
 interface scoringPlatformTestWithProperties {
     datastoreClient: DataStoreClient;
     scoringPlatform: ScoringPlatform;
@@ -52,8 +27,43 @@ function setMockMethodResponse(target: any, method: string, returnValue: any) {
     })
 }
 
-function buildMockDatastoreClient() {
-    const mockDatastoreClient = Mock.of<DataStoreClient>();
+function createFakeEvent(nextTournamentId="T1",nextMachineId="M1",nextPlayerId="P101"){
+    return {
+        nextMachineId:nextMachineId,
+        nextTournamentId:nextTournamentId,
+        nextPlayerId:nextPlayerId,
+        tournaments:{},
+        listOfPlayers:{}
+    };
+}
+
+function createFakePlayer(fakeEvent,playerId="P101",playerName="Test Player"){
+    fakeEvent.listOfPlayers[playerId]={ playerName: "Test Player", ticketCounts: {}}
+}
+
+function createFakeTicketCounts(fakeEvent,playerId="P101",fakeTournament="T1",ticketCount=0){
+    fakeEvent.listOfPlayers[playerId].ticketCounts[fakeTournament]=ticketCount;
+}
+
+function createFakeTournament(fakeEvent,tournamentId="T1",tournamentName="Test Tournament",type=TournamentTypes.HERB){
+    fakeEvent.tournaments[tournamentId]={
+        type:type,
+        tournamentName:tournamentName,
+        machines:{},
+        results:'{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[]}}'
+    }
+}
+
+function createFakeTournamentSettings(fakeEvent,settings,tournamentId="T1"){
+    fakeEvent.tournaments[tournamentId].settings=settings;
+}
+
+function createFakeMachine(fakeEvent,fakeTournamentId="T1",machineId="M1",currentPlayer=undefined,machineName="Test Machine"){
+    fakeEvent.tournaments[fakeTournamentId].machines[machineId]={
+        machineName:machineName,
+        machineQueue: [],
+        currentPlayer: currentPlayer
+    }
 }
 
 ["local", "remoteTransaction"].forEach(dsClientType => {
@@ -67,21 +77,10 @@ function buildMockDatastoreClient() {
             setMockMethodResponsePromise(this.datastoreClient, 'createDoc', null);
             setMockMethodResponsePromise(this.datastoreClient, 'getCachedDoc', undefined);
 
-
-            // Mock.extend(datastoreClient).with({
-            //     updateDoc:(data)=>{return new Promise<void>((acc,rej)=>{acc()})}
-            // })
-            //this.datastoreClient = datastoreClient;
             this.scoringPlatform = new ScoringPlatform(this.datastoreClient);
             this.mockTransactionHandle = Mock.of<firebase.firestore.Transaction>();
             this.mockDoc = Mock.of<firebase.firestore.DocumentReference<firebase.firestore.DocumentData>>();
 
-            //Mock.extend(this.mockTransactionHandle).with({
-            //set:(...a)=>{return this.mockTransactionHandle},
-            //delete:(...a)=>{return this.mockTransactionHandle},
-            //update:(...a)=>{return this.mockTransactionHandle}
-            //get:(...a)=>{return new Promise<firebase.firestore.DocumentSnapshot<firebase.firestore.DocumentData>>((acc,rej)=>{acc(mockTransactionDocData)})}
-            //})        
             if (dsClientType != "local") {
                 this.datastoreClient.transactionHandle = this.mockTransactionHandle;
                 this.datastoreClient.local = false;
@@ -97,7 +96,8 @@ function buildMockDatastoreClient() {
             expect(eventId).toEqual("UniqueId");
         })
         it('can create a tournament', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { nextTournamentId: "T1" });
+            const fakeEvent = createFakeEvent();
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent /*{ nextTournamentId: "T1" }*/);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             const tournamentId = await this.scoringPlatform.createTournament('Test Tournament', 'EventId', TournamentTypes.HERB, { maxTickets: 1 });
             const argsForUpdate = (this.datastoreClient.updateDoc as any).calls.argsFor(0);
@@ -108,7 +108,9 @@ function buildMockDatastoreClient() {
             expect(tournamentId).toEqual("T1");
         })
         it('cant create a tournament if the tournament already exists ', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { tournaments: { T1: { tournamentName: "Test Tournament" } } });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent );
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             let exceptionString: Error;
             try {
@@ -117,10 +119,11 @@ function buildMockDatastoreClient() {
                 exceptionString = E;
             }
             expect(exceptionString.message).toEqual("TOURNAMENT ALREADY EXISTS")
-            //expect(async function(){ await this.scoringPlatform.createTournament('Test Tournament','EventId',"HERB",{maxTickets:1})}).toThrowError("TOURNAMENT ALREADY EXISTS");
         })
         it('can create a machine', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { nextMachineId: "M1", tournaments: { T1: { machines: {} } } });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             const machineId = await this.scoringPlatform.createMachine('EventId', "T1", "Test Machine");
             const argsForUpdate = (this.datastoreClient.updateDoc as any).calls.argsFor(0);
@@ -130,7 +133,10 @@ function buildMockDatastoreClient() {
             expect(machineId).toEqual("M1");
         })
         it('cant create a machine if the machine already exists ', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { nextMachineId: "M1", tournaments: { T1: { machines: { M1: { machineName: "Test Machine" } } } } });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeMachine(fakeEvent);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent );
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             let exceptionString: Error;
             try {
@@ -139,10 +145,10 @@ function buildMockDatastoreClient() {
                 exceptionString = E;
             }
             expect(exceptionString.message).toEqual("MACHINE ALREADY EXISTS")
-            //expect(async function(){ await this.scoringPlatform.createTournament('Test Tournament','EventId',"HERB",{maxTickets:1})}).toThrowError("TOURNAMENT ALREADY EXISTS");
         })
         it('can create a player', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { listOfPlayers: {}, nextPlayerId: "P101" });
+            const fakeEvent = createFakeEvent();
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             const playerId = await this.scoringPlatform.createPlayer("Test Player", 'EventId');
             const argsForUpdate = (this.datastoreClient.updateDoc as any).calls.argsFor(0);
@@ -152,7 +158,9 @@ function buildMockDatastoreClient() {
             expect(playerId).toEqual("P101");
         })
         it('cant create a player that already exists', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { listOfPlayers: { P101: { playerName: "Test Player" } } });
+            const fakeEvent = createFakeEvent();
+            createFakePlayer(fakeEvent);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent );
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             let exceptionString: Error;
             try {
@@ -164,21 +172,34 @@ function buildMockDatastoreClient() {
 
         })
         it('can manage tickets for a player', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { listOfPlayers: { P101: { playerName: "Test Player", ticketCounts: { T1: 0 } } } });
+            const fakeEvent = createFakeEvent();
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent );
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.boboPurchaseTicket("EventId", "T1", "P101", 1)
             const argsForUpdate = (this.datastoreClient.updateDoc as any).calls.argsFor(0);
             expect(argsForUpdate[1]['listOfPlayers.P101.ticketCounts'].T1).toEqual(1);
         })
         it('can purchase tickets for a player', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { tournaments: { T1: { settings: { maxTickets: 1 } } }, listOfPlayers: { P101: { playerName: "Test Player", ticketCounts: {} } } });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent);
+            createFakeTournamentSettings(fakeEvent,{maxTickets:1})
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent );
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.realPurchaseTicket("EventId", "T1", "P101", 1)
             const argsForUpdate = (this.datastoreClient.updateDoc as any).calls.argsFor(0);
             expect(argsForUpdate[1]['listOfPlayers.P101.ticketCounts'].T1).toEqual(1);
         })
         it('cant purchase more than max tickets for a player', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { tournaments: { T1: { settings: { maxTickets: 1 } } }, listOfPlayers: { P101: { playerName: "Test Player", ticketCounts: { T1: 1 } } } });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent,"P101","T1",1);
+            createFakeTournamentSettings(fakeEvent,{maxTickets:1});
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             let exceptionString: Error;
             try {
@@ -190,9 +211,14 @@ function buildMockDatastoreClient() {
         })
 
         it('can start a game for a player', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", generateEventWithTournamentAndMachineAndPlayerWithDefaultValues(
-                { maxTickets: 1, requireGameStart: true, requireTickets: true }, 1
-            ));
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeMachine(fakeEvent);
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent,"P101","T1",1);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: true })
+
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent)
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.startGame("EventId", "T1", "M1", "P101");
             const argsForUpdate = (this.datastoreClient.setDoc as any).calls.argsFor(0);
@@ -200,9 +226,14 @@ function buildMockDatastoreClient() {
             expect(argsForUpdate[1].tournaments.T1.machines.M1.machineQueue).toEqual([]);
         })
         it('can start a game for a player with no tickets when tickets are not required', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", generateEventWithTournamentAndMachineAndPlayerWithDefaultValues(
-                { maxTickets: 1, requireGameStart: true, requireTickets: false }, 0
-            ));
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeMachine(fakeEvent);
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: false })
+
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.startGame("EventId", "T1", "M1", "P101");
             const argsForUpdate = (this.datastoreClient.setDoc as any).calls.argsFor(0);
@@ -210,20 +241,31 @@ function buildMockDatastoreClient() {
             expect(argsForUpdate[1].tournaments.T1.machines.M1.machineQueue).toEqual([]);
         })
         it('cant start a game for a player without tickets when tickets are required ', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", generateEventWithTournamentAndMachineAndPlayerWithDefaultValues(
-                { maxTickets: 1, requireGameStart: true, requireTickets: true }, 0
-            ));
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeMachine(fakeEvent);
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent,"P101","T1",0);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: true })
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
+            let error:Error = new Error();
             try {
                 await this.scoringPlatform.startGame("EventId", "T1", "M1", "P101");
             } catch (E) {
-                expect((E as Error).message).toEqual("No available tickets")
+                error = E;
             }
+            expect(error.message).toEqual("No available tickets")
+
         })
         it('can record a score for a player', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", generateEventWithTournamentAndMachineAndPlayerWithDefaultValues(
-                { maxTickets: 1, requireGameStart: true, requireTickets: true }, 1, "P101"
-            ));
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: true });
+            createFakeMachine(fakeEvent,"T1","M1","P101");
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent,"P101","T1",1);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.recordScore("EventId", "T1", "M1", {
                 pinballScores: [{
@@ -237,13 +279,11 @@ function buildMockDatastoreClient() {
                 }]
             }, "P101");
             const argsForUpdate = (this.datastoreClient.setDoc as any).calls.argsFor(0);
-            //console.log(argsForUpdate[1].tournaments.T1.machines.M1);
             const rawString = argsForUpdate[1].tournaments.T1.results;
             const rawParsedTree: HerbDeserializedString = JSON.parse(
                 rawString,
                 reviver
             ) as HerbDeserializedString;
-            //console.log(argsForUpdate[1]);
             expect(argsForUpdate[1].tournaments.T1.machines.M1.currentPlayer).toEqual(null);
             expect(argsForUpdate[1].listOfPlayers.P101.ticketCounts.T1).toEqual(0);
             expect(argsForUpdate[1].listOfPlayers.P101.lastTicket.T1).toEqual(0);
@@ -251,39 +291,27 @@ function buildMockDatastoreClient() {
 
         })
         it('can get results for tournament', async function (this: scoringPlatformTestWithProperties) {
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            fakeEvent.tournaments["T1"].results='{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[["M1",[{"score":123,"playerId":"P101","machineId":"M1","ticketId":0}]]]},"rankerOptions":{"maxScoresPerTicket":{"available":false,"enabled":false},"allowOnlyOneScorePerMachine":{"available":false,"enabled":false}}}';
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
-            setMockMethodResponse(this.mockDoc, "data",
-                {
-                    tournaments:
-                    {
-                        T1: {
-                            results: '{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[["M1",[{"score":123,"playerId":"P101","machineId":"M1","ticketId":0}]]]}}'
-                        }
-                    }
-                });
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent);
             const results = await this.scoringPlatform.getResults("eventId", "T1");
             expect(results.individualResults.get("M1")[0]).toEqual({
                 playerId: "P101", machineId: "M1", score: 123, points: 100, rank: 1
             })
         })
         it('can get individual results for tournament', async function (this: scoringPlatformTestWithProperties) {
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            fakeEvent.tournaments["T1"].results='{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[["M2",[{"score":113,"playerId":"P102","machineId":"M2","ticketId":0}]],["M1",[{"score":123,"playerId":"P101","machineId":"M1","ticketId":0}]]]},"rankerOptions":{"maxScoresPerTicket":{"available":false,"enabled":false},"allowOnlyOneScorePerMachine":{"available":false,"enabled":false}}}';
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
-            setMockMethodResponse(this.mockDoc, "data",
-                {
-                    tournaments:
-                    {
-                        T1: {
-                            results: '{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[["M2",[{"score":113,"playerId":"P102","machineId":"M2","ticketId":0}]],["M1",[{"score":123,"playerId":"P101","machineId":"M1","ticketId":0}]]]}}'
-                        }
-                    }
-                });
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent)
             let results = await this.scoringPlatform.getIndividualResults("eventId", "T1", "M1");
-            //console.log(results.individualResults.get("M1"));
             expect(results.individualResults.get("M1")[0]).toEqual({
                 playerId: "P101", machineId: "M1", score: 123, points: 100, rank: 1
             })
             results = await this.scoringPlatform.getIndividualResults("eventId", "T1");
-            //console.log(results.individualResults.get("M1"));
             expect(results.individualResults.get("M1")[0]).toEqual({
                 playerId: "P101", machineId: "M1", score: 123, points: 100, rank: 1
             })
@@ -292,7 +320,13 @@ function buildMockDatastoreClient() {
             })
         })
         it('can add player to a queue', async function (this: scoringPlatformTestWithProperties) {
-            const mockDoc = generateEventWithTournamentAndMachineAndPlayerWithDefaultValues({ maxTickets: 1, }, 1, "P101");
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: true });
+            createFakeMachine(fakeEvent,"T1","M1","P101");
+            createFakePlayer(fakeEvent);
+            createFakeTicketCounts(fakeEvent,"P101","T1",1);
+            const mockDoc = fakeEvent;
             setMockMethodResponse(this.mockDoc, "data", mockDoc);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.addToQueue("EventId", "T1", "M1", "P101")
@@ -300,10 +334,16 @@ function buildMockDatastoreClient() {
             expect(argsForUpdate[1]['tournaments.T1.machines.M1.machineQueue']).toEqual([{ gameStarted: false, playerId: 'P101' }]);
         })
         it('can remove a player from a queue', async function (this: scoringPlatformTestWithProperties) {
-            const mockDoc = generateEventWithTournamentAndMachineAndPlayerWithDefaultValues({ maxTickets: 1, }, 1, "P101");
-            mockDoc.tournaments.T1.machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P102' });
-            mockDoc.tournaments.T1.machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P101' });
-            mockDoc.tournaments.T1.machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P103' });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: true });
+            createFakeMachine(fakeEvent,"T1","M1","P101");
+            createFakePlayer(fakeEvent);
+
+            const mockDoc = fakeEvent;
+            mockDoc.tournaments["T1"].machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P102' });
+            mockDoc.tournaments["T1"].machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P101' });
+            mockDoc.tournaments["T1"].machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P103' });
             setMockMethodResponse(this.mockDoc, "data", mockDoc);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             await this.scoringPlatform.removeFromQueue("EventId", "T1", "M1", "P101");
@@ -311,10 +351,14 @@ function buildMockDatastoreClient() {
             expect(argsForUpdate[1]['tournaments.T1.machines.M1.machineQueue']).toEqual([{ gameStarted: false, playerId: 'P102' }, { gameStarted: false, playerId: 'P103' }]);
         })
         it('can get queues', async function (this: scoringPlatformTestWithProperties) {
-            const mockDoc = generateEventWithTournamentAndMachineAndPlayerWithDefaultValues({ maxTickets: 1, }, 1, "P101");
-            mockDoc.tournaments.T1.machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P102' });
-            mockDoc.tournaments.T1.machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P101' });
-            mockDoc.tournaments.T1.machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P103' });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            createFakeTournamentSettings(fakeEvent, { maxTickets: 1, requireGameStart: true, requireTickets: true });
+            createFakeMachine(fakeEvent,"T1","M1","P101");
+            const mockDoc = fakeEvent;
+            mockDoc.tournaments["T1"].machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P102' });
+            mockDoc.tournaments["T1"].machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P101' });
+            mockDoc.tournaments["T1"].machines.M1.machineQueue.push({ gameStarted: false, playerId: 'P103' });
             setMockMethodResponse(this.mockDoc, "data", mockDoc);
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             const queues = await this.scoringPlatform.getQueuesForTournament("EventId", "T1");
@@ -326,12 +370,13 @@ function buildMockDatastoreClient() {
 
         })
         it('can get a tournament without results', async function (this: scoringPlatformTestWithProperties) {
-            setMockMethodResponse(this.mockDoc, "data", { fakeEventData: "fakeData", tournaments: { T1: { results: "fakeResults" } } });
+            const fakeEvent = createFakeEvent();
+            createFakeTournament(fakeEvent);
+            setMockMethodResponse(this.mockDoc, "data", fakeEvent );
             setMockMethodResponsePromise(this.datastoreClient, 'getDoc', this.mockDoc);
             const event = await this.scoringPlatform.getEvent("eventId");
             expect(event.tournaments.T1.results).toEqual(undefined);
 
         })
     })
-    //'{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[["M1",[{"score":123,"playerId":"P101","machineId":"M1","ticketId":0}]]]}}'
 })

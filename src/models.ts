@@ -1,6 +1,8 @@
 import 'reflect-metadata';
 import { Transform, Type } from 'class-transformer';
 import { ScoringPlatform, TournamentTypes } from './scoring-platform';
+import { HerbRanker } from './HerbRanker';
+import { buildRanker } from './RankerFactory';
 
 function convertStringKeyMapToNumberKeyMap<T>(value: Map<string, T>) {
   return new Map<number, T>(
@@ -8,6 +10,26 @@ function convertStringKeyMapToNumberKeyMap<T>(value: Map<string, T>) {
       return [parseInt(v), value.get(v)];
     })
   );
+}
+
+export class RankerOption {
+  available : boolean;
+  enabled: boolean;
+  value: any;
+  constructor(){
+    this.available = false;
+    this.enabled = false;
+    this.value=undefined;
+  }
+}
+export class RankerOptions {
+  maxScoresPerTicket: RankerOption;
+  allowOnlyOneScorePerMachine: RankerOption;
+
+  constructor(){
+    this.maxScoresPerTicket = new RankerOption();
+    this.allowOnlyOneScorePerMachine = new RankerOption();
+  }
 }
 
 export class EventQueueItemModel {
@@ -34,10 +56,11 @@ export class MachineModel {
 export class TournamentSettings {
   requireTickets?: boolean = false;
   requireGameStart?: boolean = false;
-  papaStyle?: boolean = true;
+  //papaStyle?: boolean = true;
   numberOfPlaysOnTicket?: number = 5;
   maxTickets = 5;
 }
+
 
 export class TournamentModel {
   tournamentName: string;
@@ -51,8 +74,8 @@ export class TournamentModel {
     this.tournamentName = tournamentName;
     this.machines = new Map();
     this.type = type;
-    this.results =
-      '{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[]}}';
+    this.results = type!=undefined?buildRanker(type).serialize(): JSON.stringify({});
+    //'{"tournamentRankings":[],"machineRankings":{"dataType":"Map","value":[]}}';
 
     //export interface HerbDeserializedString {
     // machineRankings?: Map<number, Array<HerbTreeNode>>;

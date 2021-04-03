@@ -4,53 +4,34 @@ import * as punycode from 'punycode';
 import {
   EventModel,
   TournamentModel,
-  /*TournamentResultsModel,*/ MachineModel,
+  MachineModel,
   PlayerSummaryModel,
   PlayerModel,
   EventQueueItemModel,
   TournamentSettings,
+  RankerOption,
+  RankerOptions,
 } from './models';
 import { transaction } from './transaction';
-
 import 'reflect-metadata';
 import { classToPlain, plainToClass } from 'class-transformer';
 
 import { of, Observable } from 'rxjs';
-import { map, tap, switchMap } from 'rxjs/operators';
-import {
-  CheckGameStartedTask,
-  CheckPlayerExistsTask,
-  ResetCurrentPlayerTask,
-  UpdatePlayerTicketsTask,
-  CommitTicketChangesTask,
-  UpdateMachineScoresTask,
-} from './tasks';
+
 import {
   PinballRankedResults,
   PinballIndividualRankedScore,
   PinballResult,
-  PinballScore,
   PinballCumlativeRankedScore,
 } from './PinballResult';
-import { PinballScoreRanker } from './Ranker';
-import { HerbRanker } from './HerbRanker';
+import { checkGameStarted, checkPlayerExists, herbAdjustTickets, herbCheckTicketsAvailable, setMachineCurrentPlayer, PipelineParams, recordScore, RecordScoreParams, resetCurrentPlayer } from './tasks';
+import { buildRanker } from './RankerFactory';
 
 //import { CheckGameStartedTask, CheckPlayerExistsTask, CommitTicketChangesTask, ResetCurrentPlayerTask, UpdateMachineScoresTask, UpdatePlayerTicketsTask }  from './tasks'
 
 export enum TournamentTypes {
   HERB,
   PAPA
-}
-
-class PipelineParams {
-  event: EventModel;
-  tournamentId: string;
-  machineId: string;
-  playerId: string;
-}
-
-class RecordScoreParams extends PipelineParams { 
-  score: PinballResult;
 }
 
 export class ScoringPlatform {
@@ -93,6 +74,7 @@ export class ScoringPlatform {
     return currentId.slice(0, 1) + (parseInt(currentId.slice(1)) + 1);
   }
 
+
   @transaction()
   async createEvent(eventName: string): Promise<string> {
     //Can't check for an existing event because 'where' queries can't happen
@@ -102,7 +84,7 @@ export class ScoringPlatform {
       throw new Error('event name must not be empty');
     }
     const newEvent = await this.dsClient.createDoc(
-      classToPlain(new EventModel(eventName)) 
+      classToPlain(new EventModel(eventName))
     );
     return newEvent.id;
   }
@@ -143,7 +125,7 @@ export class ScoringPlatform {
     const event =  (await this.dsClient.getDoc(eventId)).data();
     if(!withoutResults){
       return event;
-    } 
+    }
     Object.keys(event.tournaments).forEach((tournamentId)=>{
         delete event.tournaments[tournamentId].results;
     })
@@ -289,54 +271,16 @@ export class ScoringPlatform {
       playerId: playerId,
       machineId: machineId,
     };
-    const generator: Observable<PipelineParams> = of<PipelineParams>(
+    const generator: Observable<any>= of(
       startGameParams
     );
-    const checkPlayerExists = tap<PipelineParams>(
-      (params: PipelineParams) => {
-        if (
-          !Array.from(params.event.listOfPlayers.keys()).includes(
-            params.playerId
-          )
-        ) {
-          throw new Error('Player does not exist');
-        }
-      }
-    );
-    const herbCheckTicketsAvailable = tap<PipelineParams>(
-      (params: PipelineParams) => {
-        const tournament = params.event.tournaments.get(params.tournamentId);
-        if (!tournament.settings.requireTickets) {
-          return;
-        }
-        const player = params.event.listOfPlayers.get(params.playerId);
-        const ticketCount = player.getTicketCounts(params.tournamentId);
-        if (ticketCount == undefined || ticketCount == 0) {
-          throw new Error('No available tickets');
-        }
-      }
-    );
-    const herbSetMachineCurrentPlayer = tap<PipelineParams>(
-      (params: PipelineParams) => {
-        //FIXME : need something to check that currentPlayer is empty - might need to happen
-        //        outside the pipeline
-        const machine: MachineModel = params.event.tournaments
-          .get(params.tournamentId)
-          .machines.get(params.machineId);
-        machine.currentPlayer = params.playerId;
-        machine.machineQueue = machine.machineQueue.filter((e) => {
-          return e.playerId != params.playerId;
-        });
-        return event;
-      }
-    );
-    const steps = [checkPlayerExists];
+
     return new Promise((accpet, reject) => {
       generator
         .pipe(
           checkPlayerExists,
           herbCheckTicketsAvailable,
-          herbSetMachineCurrentPlayer
+          setMachineCurrentPlayer
         )
         .subscribe(
           async (res) => {
@@ -396,7 +340,6 @@ export class ScoringPlatform {
       EventModel,
       (await this.dsClient.getDoc(eventId)).data()
     );
-
     const recordScoreParams: RecordScoreParams = {
       event: event,
       tournamentId: tournamentId,
@@ -404,108 +347,17 @@ export class ScoringPlatform {
       playerId: playerId,
       score: score,
     };
-    const generator: Observable<RecordScoreParams> = of<RecordScoreParams>(
+    const generator: Observable<any> = of(
       recordScoreParams
     );
-    const checkPlayerExists = tap<RecordScoreParams>(
-      (params: RecordScoreParams) => {
-        if (
-          !Array.from(params.event.listOfPlayers.keys()).includes(
-            params.playerId
-          )
-        ) {
-          throw new Error('Player does not exist');
-        }
-      }
-    );
-    const herbCheckTicketsAvailable = tap<RecordScoreParams>(
-      (params: RecordScoreParams) => {
-        const tournament = params.event.tournaments.get(params.tournamentId);
-        if (
-          tournament.settings.requireTickets != true ||
-          tournament.type != TournamentTypes.HERB
-        ) {
-          return;
-        }
-        const player = params.event.listOfPlayers.get(params.playerId);
-        if (player.getTicketCounts(params.tournamentId) == 0) {
-          throw new Error('Player has no tickets available');
-        }
-      }
-    );
-    const herbCheckGameStarted = tap<RecordScoreParams>(
-      (params: RecordScoreParams) => {
-        const tournament = params.event.tournaments.get(params.tournamentId);
-        if (
-          tournament.type != TournamentTypes.HERB ||
-          tournament.settings.requireGameStart != true
-        ) {
-          return;
-        }
-        const currentPlayer = params.event.tournaments
-          .get(params.tournamentId)
-          .machines.get(params.machineId).currentPlayer;
-        if (currentPlayer == null) {
-          throw new Error('Trying to record score on empty machine');
-        }
-        if (currentPlayer != params.playerId) {
-          throw new Error(
-            'Trying to record score for one player, but another player is on the machine'
-          );
-        }
-      }
-    );
 
-    const herbResetCurrentPlayer = tap<RecordScoreParams>(
-      (params: RecordScoreParams) => {
-        const tournament = params.event.tournaments.get(params.tournamentId);
-        if (tournament.type != TournamentTypes.HERB) {
-          return;
-        }
-        params.event.tournaments
-          .get(params.tournamentId)
-          .machines.get(params.machineId).currentPlayer = null;
-      }
-    );
-
-    const herbAdjustTickets = tap<RecordScoreParams>(
-      (params: RecordScoreParams) => {
-        const tournament = params.event.tournaments.get(params.tournamentId);
-        if (tournament.type != TournamentTypes.HERB) {
-          return;
-        }
-        const player = params.event.listOfPlayers.get(params.playerId);
-        player.modifyTicketCount(
-          params.tournamentId,
-          player.getTicketCounts(params.tournamentId) - 1
-        );
-        player.incrementLastTicket(params.tournamentId);
-        params.score.ticketId = player.lastTicket.get(params.tournamentId);
-      }
-    );
-    const recordScore = tap<RecordScoreParams>((params: RecordScoreParams) => {
-      const tournament = params.event.tournaments.get(params.tournamentId);
-      if (tournament.type != TournamentTypes.HERB) {
-        return;
-      }
-      let ranker: PinballScoreRanker;
-      if (tournament.type == TournamentTypes.HERB) {
-        ranker = new HerbRanker();
-      }
-      ranker.deserialize(tournament.results);
-      ranker.addResult(params.score);
-      tournament.results = ranker.serialize();
-    });
     return new Promise((accpet, reject) => {
-      //   generator.pipe.apply(generator, steps).subscribe(
-      //generator.pipe.apply(generator, steps).subscribe(
-        
       generator
         .pipe(
           checkPlayerExists,
           herbCheckTicketsAvailable,
-          herbCheckGameStarted,
-          herbResetCurrentPlayer,
+          checkGameStarted,
+          resetCurrentPlayer,
           herbAdjustTickets,
           recordScore
         )
@@ -525,38 +377,15 @@ export class ScoringPlatform {
   }
 
   @transaction()
-  async getTournamentResults(eventId, tournamentId) {
-    const event = plainToClass(
-      EventModel,
-      (await this.dsClient.getDoc(eventId)).data()
-    );
-    const machines = event.tournaments.get(tournamentId).machines;
-    const tournamentResults = {};
-    //   for (const [machineId,machine] of machines.entries()) {
-    //          for (const parsedMachineResult of  await this.getMachineResults(eventId,tournamentId,machineId)) {
-    //           if (tournamentResults[parsedMachineResult.ticketId] == undefined) {
-    //               tournamentResults[parsedMachineResult.ticketId] = new TournamentScore(parsedMachineResult.playerId,parsedMachineResult.ticketId);
-    //           }
-    //           tournamentResults[parsedMachineResult.ticketId].points = tournamentResults[parsedMachineResult.ticketId].points + parsedMachineResult.points;
-    //           tournamentResults[parsedMachineResult.ticketId].machines.push(machine.machineName + "(" + parsedMachineResult.rank + ")");
-    //           //tournamentResults[parsedMachineResult.ticketId].machinesWithScores.push({ points: parsedMachineResult.points, machine: machine.machineName, abbrev: machine.machineName.substring(0, 3), rank: parsedMachineResult.rank, score: parsedMachineResult.score });
-    //       }
-    //   }
-    //   const sortedTournamentResults = Object.values(tournamentResults).sort((a:any, b:any) => { return a.points > b.points ? -1 : a.points == b.points ? 0 : 1 });
-    //   return ScoringPlatform.rank(sortedTournamentResults,'points','rank') as TournamentScore[];
-    return new Array<any>();
-  }
-
-  @transaction()
   async getResults(eventId, tournamentId): Promise<PinballRankedResults> {
     const event = plainToClass(
       EventModel,
       (await this.dsClient.getDoc(eventId)).data()
     );
     const tournament = event.tournaments.get(tournamentId);
-    const herbRanker = new HerbRanker();
-    herbRanker.deserialize(tournament.results);
-    return herbRanker.getResults();
+    const ranker = buildRanker(tournament.type);//new HerbRanker();
+    ranker.deserialize(tournament.results);
+    return ranker.getResults();
   }
 
   @transaction()
@@ -570,9 +399,9 @@ export class ScoringPlatform {
       (await this.dsClient.getDoc(eventId)).data()
     );
     const tournament = event.tournaments.get(tournamentId);
-    const herbRanker = new HerbRanker();
-    herbRanker.deserialize(tournament.results);
-    const rankedResults = herbRanker.getResults();
+    const ranker = buildRanker(tournament.type);// new HerbRanker();
+    ranker.deserialize(tournament.results);
+    const rankedResults = ranker.getResults();
     Array.from(rankedResults.individualResults.keys()).forEach((id) => {
       if (machineId != id && machineId != undefined) {
         rankedResults.individualResults.delete(id);
@@ -592,41 +421,15 @@ export class ScoringPlatform {
       (await this.dsClient.getDoc(eventId)).data()
     );
     const tournament = event.tournaments.get(tournamentId);
-    const herbRanker = new HerbRanker();
-    herbRanker.deserialize(tournament.results);
-    const rankedResults = herbRanker.getResults();
+    const ranker = buildRanker(tournament.type);//new HerbRanker();
+    ranker.deserialize(tournament.results);
+    const rankedResults = ranker.getResults();
     rankedResults.individualResults = new Map<
       string,
       Array<PinballIndividualRankedScore>
     >();
     return rankedResults;
   }
-
-  //   @transaction()
-  //   async getMachineResults(
-  //     eventId,
-  //     tournamentId,
-  //     machineId
-  //   ): Promise<PinballScore[]> {
-  //     const event = plainToClass(
-  //       EventModel,
-  //       (await this.dsClient.getDoc(eventId)).data()
-  //     );
-  //     const resultResults = event.tournaments
-  //       .get(tournamentId)
-  //       .machines.get(machineId);
-  //     //   if (this.compression == true) {
-  //     //       resultResults = LZString.decompressFromUTF16(resultResults.machineResults);
-  //     //   }
-  //     //   const machineResults:PinballScore[] = new ScoringResultsTree()
-  //     //                          .loadScoringResultsTreeFromEncodedString(resultResults)
-  //     //                          .extractSortedAndRankedScoresFromEncodedMachineResults();
-  //     //   for (const machineResult of machineResults) {
-  //     //           machineResult.points = event.tournaments.get(tournamentId).settings.pointFunction(machineResult.rank);
-  //     //   }
-  //     //   return machineResults;
-  //     return new Array<PinballScore>();
-  //   }
 
   async getPlayers(eventId) {
     return (await this.dsClient.getDoc(eventId)).data().listOfPlayers;
@@ -674,6 +477,15 @@ export class ScoringPlatform {
     await this.dsClient.updateDoc(eventId, {
       ['tournaments.'+tournamentId+'.machines.'+machineId+'.machineQueue']: classToPlain(queue)
     });  }
+
+  // @transaction()
+  // async setRankerOptions(eventId:string,tournamentId:string,rankerOptions:RankerOptions){
+  //   const event = plainToClass(EventModel,(await this.dsClient.getDoc(eventId)).data());
+  //   const tournament = event.tournaments.get(tournamentId);
+  //   const ranker = buildRanker(tournament.type);
+  //   ranker.deserialize(tournament.results);
+  // }
+
   // @transaction()
   // async insertIntoQueue(eventId,tournamentId,machineId,playerId,position): Promise<void>{
   //     const event = plainToClass(EventModel,(await this.dsClient.getDoc(eventId)).data());

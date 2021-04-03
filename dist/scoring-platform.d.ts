@@ -2,6 +2,10 @@ import { DataStoreClient } from './data-store-client';
 import { EventQueueItemModel, TournamentSettings } from './models';
 import 'reflect-metadata';
 import { PinballRankedResults, PinballResult } from './PinballResult';
+export declare enum TournamentTypes {
+    HERB = 0,
+    PAPA = 1
+}
 export declare class ScoringPlatform {
     dsClient: DataStoreClient;
     compression: boolean;
@@ -10,8 +14,8 @@ export declare class ScoringPlatform {
     static getByteLen(normalVal: any): number;
     static incrementStringId(currentId: string): string;
     createEvent(eventName: string): Promise<string>;
-    createTournament(tournamentName: any, eventId: any, type: any, tournamentSettings?: TournamentSettings): Promise<string>;
-    getEvent(eventId: string, withoutResults: boolean, useCached?: boolean): Promise<import("firebase").default.firestore.DocumentData>;
+    createTournament(tournamentName: string, eventId: string, type: TournamentTypes, tournamentSettings?: TournamentSettings): Promise<string>;
+    getEvent(eventId: string, withoutResults?: boolean, useCached?: boolean): Promise<import("firebase").default.firestore.DocumentData>;
     updateTournamentSettings(eventId: any, tournamentId: any, settings: TournamentSettings): Promise<void>;
     createMachine(eventId: string, tournamentId: any, machineName: string): Promise<string>;
     createPlayer(playerName: any, eventId: any): Promise<string>;

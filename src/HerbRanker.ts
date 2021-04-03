@@ -1,4 +1,5 @@
 import AVLTree from 'avl';
+import { RankerOptions } from './models';
 import {
   PinballResult,
   PinballRankedResults,
@@ -19,6 +20,7 @@ export interface HerbTreeNode {
 export interface HerbDeserializedString {
   machineRankings?: Map<string, Array<HerbTreeNode>>;
   tournamentRankings?: Array<PinballCumlativeRankedScore>;
+  rankerOptions?: RankerOptions;
 }
 
 //https://stackoverflow.com/questions/29085197/how-do-you-json-stringify-an-es6-map
@@ -46,10 +48,16 @@ export function reviver(key, value) {
 export class HerbRanker implements PinballScoreRanker {
   machineRankings: Map<string, AVLTree<number, HerbTreeNode>>;
   tournamentRankings: AVLTree<number, any>;
+  rankerOptions: RankerOptions;
+
   //FIXME : need to be able to pass in configurations at creation time for points configuration
   constructor() {
     this.machineRankings = new Map<string, AVLTree<number, HerbTreeNode>>();
     this.tournamentRankings = new AVLTree<number, any>();
+    this.rankerOptions = new RankerOptions();
+    this.rankerOptions.maxScoresPerTicket.value=3;
+    this.rankerOptions.maxScoresPerTicket.enabled=true;
+
   }
   //FIXME : deserialize should be a static builder that returns a PinballScoreRanker.  This
   //        requires some fancy footwork in the PinballScoreRanker to make deserialize static
@@ -68,6 +76,8 @@ export class HerbRanker implements PinballScoreRanker {
       }
       this.machineRankings.get(machineKey).load(keys, scores);
     });
+    this.rankerOptions = rawParsedTree.rankerOptions;
+
     //throw new Error("Method not implemented.");
   }
   serialize(): string {
@@ -86,11 +96,11 @@ export class HerbRanker implements PinballScoreRanker {
         serializeObject.machineRankings.get(machineKey).push(score.data);
       });
     });
+    serializeObject.rankerOptions=this.rankerOptions;
     return JSON.stringify(serializeObject, replacer);
   }
 
   addResult(pinballResult: PinballResult): void {
-    //FIXME : record only one score per player per machine - this will probably require building a hash at load time which doesn't get serialized
     pinballResult.pinballScores.forEach((scoreVal: PinballScore) => {
       scoreVal.scoringPlayers.forEach((playerVal: ScoringPlayer) => {
         if (!this.machineRankings.get(scoreVal.machineId)) {
@@ -118,7 +128,7 @@ export class HerbRanker implements PinballScoreRanker {
     const playerRankedArray = new Array<PinballCumlativeRankedScore>();
     pinballRankedResults.cumalativeResults = new Array<PinballCumlativeRankedScore>();
     this.machineRankings.forEach(
-      (val: AVLTree<number, HerbTreeNode>, machineKey) => {
+      (machineTreeVal: AVLTree<number, HerbTreeNode>, machineKey) => {
         pinballRankedResults.tournamentType = 'HERB';
         pinballRankedResults.individualResults.set(
           machineKey,
@@ -126,24 +136,36 @@ export class HerbRanker implements PinballScoreRanker {
         );
         let rank = 1;
         let prevScore = -1;
-        val.values().forEach((val: HerbTreeNode, machineScoreIndex) => {
-          if (prevScore != val.score) {
+        const playerExistingScoreOnMachine = new Map<string,number>();
+        machineTreeVal.values().forEach((herbTreeNodeVal: HerbTreeNode, machineScoreIndex) => {
+          if(this.rankerOptions.allowOnlyOneScorePerMachine.value==true){
+            let existingScore = playerExistingScoreOnMachine.get(herbTreeNodeVal.playerId);
+            if(existingScore!=undefined && existingScore>=herbTreeNodeVal.score){
+              return;
+            }
+            if(existingScore==undefined){
+              playerExistingScoreOnMachine.set(herbTreeNodeVal.playerId,herbTreeNodeVal.score);
+              existingScore=herbTreeNodeVal.score;
+            }
+          }
+          if (prevScore != herbTreeNodeVal.score) {
             rank = machineScoreIndex + 1;
           }
+          //FIXME : the following line should use rank and not machineScoreIndex
           let points = 100-machineScoreIndex;
-          prevScore = val.score;
+          prevScore = herbTreeNodeVal.score;
           pinballRankedResults.individualResults.get(machineKey).push({
-            playerId: val.playerId,
-            machineId: val.machineId,
-            score: val.score,
+            playerId: herbTreeNodeVal.playerId,
+            machineId: herbTreeNodeVal.machineId,
+            score: herbTreeNodeVal.score,
             points: points,
             rank: rank,
           });
-          if(!playerRankedHash.get(val.playerId)){
-            playerRankedHash.set(val.playerId,{machineResults:new Array<any>(),totalPoints:0,playerId:val.playerId});
-            playerRankedArray.push(playerRankedHash.get(val.playerId));
+          if(!playerRankedHash.get(herbTreeNodeVal.playerId)){
+            playerRankedHash.set(herbTreeNodeVal.playerId,{machineResults:new Array<any>(),totalPoints:0,playerId:herbTreeNodeVal.playerId});
+            playerRankedArray.push(playerRankedHash.get(herbTreeNodeVal.playerId));
           }
-          playerRankedHash.get(val.playerId).machineResults.push({machineId:val.machineId,rank:rank,points:points})
+          playerRankedHash.get(herbTreeNodeVal.playerId).machineResults.push({machineId:herbTreeNodeVal.machineId,rank:rank,points:points})
         });
       }
     );
@@ -157,11 +179,15 @@ export class HerbRanker implements PinballScoreRanker {
         }
         return 0;
       })
-      v.machineResults = v.machineResults.slice(0,3);
+      const maxScoresEnabled = this.rankerOptions.maxScoresPerTicket;
+      const maxScores= this.rankerOptions.maxScoresPerTicket.value;
+
+      const maxScoresPerTicket = maxScoresEnabled?maxScores:v.machineResults.length;
+      v.machineResults = v.machineResults.slice(0,maxScoresPerTicket);
       const reducer = (a, b) => a + (b.points || 0);
 
       v.totalPoints = v.machineResults.reduce(reducer,0)
-    })   
+    })
     pinballRankedResults.cumalativeResults = playerRankedArray.sort((a,b)=>{
       if(a.totalPoints < b.totalPoints){
         return 1;

@@ -1,129 +1,130 @@
 import { of, Observable, OperatorFunction } from 'rxjs';
 import { map, tap, switchMap } from 'rxjs/operators';
-import { EventModel } from './models';
+import { EventModel, MachineModel } from './models';
 import { DataStoreClient, Modes } from './data-store-client';
-import { ScoringPlatform } from './scoring-platform';
+import { ScoringPlatform, TournamentTypes } from './scoring-platform';
+import { PinballResult } from './PinballResult';
+import { PinballScoreRanker } from './Ranker';
+import { HerbRanker } from './HerbRanker';
+import { buildRanker } from './RankerFactory';
 
-interface PipelineTask {
-  task: OperatorFunction<any, any>;
+
+export class PipelineParams {
+  event: EventModel;
+  tournamentId: string;
+  machineId: string;
+  playerId: string;
 }
 
-class BaseTask {
-  dsClient: DataStoreClient;
-  params: any;
-  task: OperatorFunction<any, any>;
-  constructor(dsClient: DataStoreClient, params: any) {
-    this.dsClient = dsClient;
-    this.params = params;
+export class RecordScoreParams extends PipelineParams {
+  score: PinballResult;
+}
+
+export const checkPlayerExists = tap(
+  (params: PipelineParams) => {
+    if (
+      !Array.from(params.event.listOfPlayers.keys()).includes(
+        params.playerId
+      )
+    ) {
+      throw new Error('Player does not exist');
+    }
   }
-}
-export class CheckGameStartedTask extends BaseTask implements PipelineTask {
-  task = map((event: EventModel) => {
-    const currentPlayer = event.tournaments
-      .get(this.params.tournamentId)
-      .machines.get(this.params.machineId).currentPlayer;
+);
+
+
+export const setMachineCurrentPlayer = tap(
+  (params: PipelineParams) => {
+    //FIXME : need something to check that currentPlayer is empty - might need to happen
+    //        outside the pipeline
+    const machine: MachineModel = params.event.tournaments
+      .get(params.tournamentId)
+      .machines.get(params.machineId);
+    machine.currentPlayer = params.playerId;
+    machine.machineQueue = machine.machineQueue.filter((e) => {
+      return e.playerId != params.playerId;
+    });
+    //return event;
+  })
+
+export const checkGameStarted = tap(
+  (params: RecordScoreParams) => {
+    const tournament = params.event.tournaments.get(params.tournamentId);
+    if (
+      //tournament.type != TournamentTypes.HERB ||
+      tournament.settings.requireGameStart != true
+    ) {
+      return;
+    }
+    const currentPlayer = params.event.tournaments
+      .get(params.tournamentId)
+      .machines.get(params.machineId).currentPlayer;
     if (currentPlayer == null) {
       throw new Error('Trying to record score on empty machine');
     }
-    if (currentPlayer != this.params.playerId) {
+    if (currentPlayer != params.playerId) {
       throw new Error(
         'Trying to record score for one player, but another player is on the machine'
       );
     }
-    return event;
-  });
-}
-export class CheckPlayerExistsTask extends BaseTask implements PipelineTask {
-  task = map((event: EventModel) => {
-    if (event.listOfPlayers.get(this.params.playerId) == undefined) {
-      throw new Error('Trying to record score with player that does not exist');
-    }
-    return event;
-  });
-}
-export class ResetCurrentPlayerTask extends BaseTask implements PipelineTask {
-  task = switchMap(async (event: EventModel) => {
-    await this.dsClient.updateDoc(this.params.eventId, {
-      [ScoringPlatform.getMachinePath(
-        this.params.tournamentId,
-        this.params.machineId
-      ) + '.currentPlayer']: null,
-    });
-    return event;
-  });
-}
+  }
+);
 
-export class UpdatePlayerTicketsTask extends BaseTask implements PipelineTask {
-  task = switchMap(async (event: EventModel) => {
-    const decompressed = event.tournaments
-      .get(this.params.tournamentId)
-      .machines.get(this.params.machineId).machineResults;
 
-    const nextTicketId = '1'; //ScoringPlatform.extractNextTicketIdFromResults(decompressed, this.params.playerId)
-    const player = event.listOfPlayers.get(this.params.playerId);
-    const ticketCount = player.getTicketCounts(this.params.tournamentId);
-    const currentTicket = player.getCurrentTicket(this.params.tournamentId);
-    if (currentTicket == undefined) {
-      player.modifyCurrentTicket(
-        this.params.tournamentId,
-        1,
-        event.tournaments.get(this.params.tournamentId).settings
-          .numberOfPlaysOnTicket - 1
-      );
-    } else {
-      //FIXME : need an option to be passed saying tickets should be paid attention to?
-      player.modifyCurrentTicket(
-        this.params.tournamentId,
-        currentTicket[0],
-        currentTicket[1] - 1
-      );
-    }
-    return event;
-  });
-}
-export class CommitTicketChangesTask extends BaseTask implements PipelineTask {
-  task = switchMap(async (event: EventModel) => {
-    const player = event.listOfPlayers.get(this.params.playerId);
-    const ticketCount = player.getTicketCounts(this.params.tournamentId);
-    const currentTicket = player.getCurrentTicket(this.params.tournamentId);
-    //FIXME : need an option to be passed saying tickets should be paid attention to
-    if (currentTicket) {
-      if (currentTicket[1] == 0) {
-        player.resetCurrentTicket(this.params.tournamentId);
-        player.modifyTicketCount(this.params.tournamentId, ticketCount - 1);
-      }
-      await this.dsClient.updateDoc(this.params.eventId, {
-        ['listOfPlayers.' +
-        this.params.playerId +
-        '.currentTickets']: player.currentTickets,
-        ['listOfPlayers.' +
-        this.params.playerId +
-        '.ticketCounts']: player.ticketCounts,
-      });
-    }
-    return event;
-  });
-}
-
-export class UpdateMachineScoresTask extends BaseTask implements PipelineTask {
-  task = switchMap(async (event: EventModel) => {
-    // let decompressed = event.tournaments.get(this.params.tournamentId).machines.get(this.params.machineId).machineResults;
-    // // if (this.params.compression == true) {
-    // //     decompressed = LZString.decompressFromUTF16(decompressed);
-    // // }
-    // const scratchTree = new ScoringResultsTree()
-    // scratchTree.loadScoringResultsTreeFromEncodedString(decompressed);
-    // const currentTicket = event.listOfPlayers.get(this.params.playerId).getCurrentTicket(this.params.tournamentId)
-    // const ticketId = currentTicket[0]
-    // const encodedScore = PinballScore.buildEncodedScore(this.params.score, this.params.playerId, ticketId).encodedScore;
-    // scratchTree.insert(encodedScore);
-    // const keys = scratchTree.keys();
-    // let newScores = keys.join("");
-    // if (this.params.compression == true) {
-    //     newScores = LZString.compressToUTF16(newScores);
+export const resetCurrentPlayer = tap(
+  (params: RecordScoreParams) => {
+    const tournament = params.event.tournaments.get(params.tournamentId);
+    // if (tournament.type != TournamentTypes.HERB) {
+    //   return;
     // }
-    // await this.dsClient.updateDoc(this.params.eventId, { [ScoringPlatform.getMachinePath(this.params.tournamentId,this.params.machineId)+'.machineResults']: newScores ,
-    //                                           nextTicketId: event.nextTicketId + 1});
-    return event;
-  });
-}
+    params.event.tournaments
+      .get(params.tournamentId)
+      .machines.get(params.machineId).currentPlayer = null;
+  }
+);
+
+
+export const recordScore = tap((params: RecordScoreParams) => {
+  const tournament = params.event.tournaments.get(params.tournamentId);
+  // if (tournament.type != TournamentTypes.HERB) {
+  //   return;
+  // }
+  const ranker: PinballScoreRanker = buildRanker(tournament.type);
+  // if (tournament.type == TournamentTypes.HERB) {
+  //   ranker = new HerbRanker();
+  // }
+  ranker.deserialize(tournament.results);
+  ranker.addResult(params.score);
+  tournament.results = ranker.serialize();
+});
+
+export const herbCheckTicketsAvailable = tap(
+  (params: PipelineParams) => {
+    const tournament = params.event.tournaments.get(params.tournamentId);
+    if (!tournament.settings.requireTickets) {
+      return;
+    }
+    const player = params.event.listOfPlayers.get(params.playerId);
+    const ticketCount = player.getTicketCounts(params.tournamentId);
+    if (ticketCount == undefined || ticketCount == 0) {
+      throw new Error('No available tickets');
+    }
+  }
+);
+
+
+export const herbAdjustTickets = tap(
+  (params: RecordScoreParams) => {
+    const tournament = params.event.tournaments.get(params.tournamentId);
+    if (tournament.type != TournamentTypes.HERB) {
+      return;
+    }
+    const player = params.event.listOfPlayers.get(params.playerId);
+    player.modifyTicketCount(
+      params.tournamentId,
+      player.getTicketCounts(params.tournamentId) - 1
+    );
+    player.incrementLastTicket(params.tournamentId);
+    params.score.ticketId = player.lastTicket.get(params.tournamentId);
+  }
+);
