@@ -1,15 +1,20 @@
 V1
 # make admin SDK friendly
 # implement using cloud functions
-# spike on design for modular ui
+# spike on design for ui - check
 # add lots of unit tests
 # implement integration tests
 # cleanup unused code and make sure class and interface definitions are where they need to be
 # implement docs ( typedoc and neo-theme )
 
+V1.5 ( selfie ranker)
+# implement selfie ranker
+* record score
+* add ability to have "pending" scores in results
+# implement "approve score" with admin module ( i.e. like the ranker, but for modifiying scores)
+# implement emailing and endpoint for "approving" scores 
+
 V2
-
-
 # get rid of poor mans serialize/deserialize in ranker - replace with fancy serialize/deserialize that converts to minimal output ( i.e. bit encoded )
 # fix platform unit tests that have a static results serialized string so it uses functions shared with ranker unit tests - check
 # implement tournament enable/disbaled

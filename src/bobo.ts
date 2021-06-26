@@ -1,3 +1,4 @@
+//https://stackoverflow.com/questions/51865430/typescript-compiler-does-not-know-about-es6-proxy-trap-on-class
 var STRIP_COMMENTS = /(\/\/.*$)|(\/\*[\s\S]*?\*\/)|(\s*=[^,\)]*(('(?:\\'|[^'\r\n])*')|("(?:\\"|[^"\r\n])*"))|(\s*=[^,\)]*))/mg;
 var ARGUMENT_NAMES = /([^\s,]+)/g;
 function getParamNames(func) {
@@ -39,3 +40,23 @@ export class testClass {
     }
 }
 
+const blah = {
+    value_one:"blah",
+    value_two:1
+}
+
+const classTest = new Proxy(blah,{});
+// classTest
+interface FooInterface {
+    [key: string]: any;
+    //numberOne:number;
+    //stringOne:string;
+  }
+
+  // From the factory we return the FooInterface
+  const proxyFactory = (): FooInterface => {
+    return new Proxy(blah, {});
+  };
+
+  const fooProxy = proxyFactory();
+  fooProxy
